@@ -141,7 +141,7 @@ public class ImldInferenceServiceImpl implements ImldInferenceService {
         String riskLevel = riskLevelFromProbability(riskProbability);
 
         List<ImldInferenceApiDtos.Response.FeatureContribution> contributions =
-                topFeatureContributions(aligned, meta.featureColumns(), 8);
+                topFeatureContributions(aligned, meta.featureColumns(), meta.featureMedians(), 8);
         List<String> suggestions = buildSuggestions(riskLevel, prepared.geneAbnormalities(), prepared.clinicalAbnormalities());
 
         return new ImldInferenceApiDtos.Response.PredictData(
@@ -664,17 +664,36 @@ public class ImldInferenceServiceImpl implements ImldInferenceService {
         return clamp(probability, 0.0, 1.0);
     }
 
+    /**
+     * 计算顶部特征贡献度。
+     *
+     * <p>以训练集中位数为基线，计算特征值相对基线的偏差方向，
+     * 给出正向/负向贡献，便于医生理解模型判断依据。</p>
+     */
     private List<ImldInferenceApiDtos.Response.FeatureContribution> topFeatureContributions(
-            float[] alignedFeatures, List<String> featureColumns, int topK) {
-        List<ImldInferenceApiDtos.Response.FeatureContribution> fallback = new ArrayList<>();
+            float[] alignedFeatures, List<String> featureColumns,
+            Map<String, Double> featureMedians, int topK) {
+        List<ImldInferenceApiDtos.Response.FeatureContribution> contributions = new ArrayList<>();
         for (int i = 0; i < Math.min(alignedFeatures.length, featureColumns.size()); i++) {
-            double magnitude = Math.signum(alignedFeatures[i]) * Math.log1p(Math.abs(alignedFeatures[i]));
-            if (Math.abs(magnitude) < 1e-9) {
+            String feature = featureColumns.get(i);
+            double featureValue = alignedFeatures[i];
+            double baseline = featureMedians.getOrDefault(feature, 0.0);
+            double delta = featureValue - baseline;
+            if (Math.abs(delta) < 1e-9) {
                 continue;
             }
-            fallback.add(new ImldInferenceApiDtos.Response.FeatureContribution(featureColumns.get(i), round6(magnitude)));
+            double contribution = Math.signum(delta) * Math.log1p(Math.abs(delta));
+            String direction = delta > 0 ? "POSITIVE" : "NEGATIVE";
+            contributions.add(new ImldInferenceApiDtos.Response.FeatureContribution(
+                    feature,
+                    round6(featureValue),
+                    round6(baseline),
+                    round6(contribution),
+                    direction,
+                    "MEDIAN_DELTA_APPROXIMATION"
+            ));
         }
-        return fallback.stream()
+        return contributions.stream()
                 .sorted(Comparator.comparingDouble(value -> -Math.abs(value.contribution())))
                 .limit(topK)
                 .toList();

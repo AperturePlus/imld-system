@@ -71,7 +71,8 @@ class PatientServiceImplTest {
 
         var request = new IdentityApiDtos.Request.CreatePatientRequest(
                 "P001", "张三", "MALE", LocalDate.of(1990, 1, 1),
-                "310101199001011234", "13800138000", "INPATIENT", "HOSPITAL");
+                "310101199001011234", "13800138000", "INPATIENT", "HOSPITAL",
+                "工程师", "上海市浦东新区", "上海", Boolean.FALSE);
 
         Patient result = patientService.createPatient(1L, request);
 
@@ -79,6 +80,10 @@ class PatientServiceImplTest {
         assertThat(result.getPatientNo()).isEqualTo("P001");
         assertThat(result.getIdNoEncrypted()).isEqualTo("encrypted_id");
         assertThat(result.getMobileEncrypted()).isEqualTo("encrypted_mobile");
+        assertThat(result.getOccupation()).isEqualTo("工程师");
+        assertThat(result.getCurrentAddress()).isEqualTo("上海市浦东新区");
+        assertThat(result.getNativePlace()).isEqualTo("上海");
+        assertThat(result.getConsanguinity()).isFalse();
         assertThat(result.getStatus()).isEqualTo("ACTIVE");
 
         verify(sensitiveDataEncryptor).encrypt("310101199001011234");
@@ -94,13 +99,44 @@ class PatientServiceImplTest {
         });
 
         var request = new IdentityApiDtos.Request.CreatePatientRequest(
-                "P002", "李四", "FEMALE", null, null, null, "OUTPATIENT", null);
+                "P002", "李四", "FEMALE", null, null, null, "OUTPATIENT", null,
+                null, null, null, null);
 
         Patient result = patientService.createPatient(1L, request);
 
         assertThat(result.getIdNoEncrypted()).isNull();
         assertThat(result.getMobileEncrypted()).isNull();
         assertThat(result.getSourceChannel()).isEqualTo("HOSPITAL");
+    }
+
+    @Test
+    void updatePatientProfilePersistsDemographicsWithoutChangingPatientNo() {
+        Patient patient = new Patient();
+        patient.setId(102L);
+        patient.setTenantId(1L);
+        patient.setPatientNo("P102");
+        patient.setPatientName("旧姓名");
+        patient.setPatientType("OUTPATIENT");
+        patient.setStatus("ACTIVE");
+        patient.setSourceChannel("HOSPITAL");
+        when(patientRepository.findById(1L, 102L)).thenReturn(Optional.of(patient));
+        when(patientRepository.update(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var request = new IdentityApiDtos.Request.CreatePatientRequest(
+                "P102", "新姓名", "FEMALE", LocalDate.of(1985, 2, 3),
+                null, null, "OUTPATIENT", "HOSPITAL",
+                "教师", "杭州市西湖区", "浙江", Boolean.TRUE);
+
+        Patient result = patientService.updatePatientProfile(1L, 102L, request);
+
+        assertThat(result.getPatientNo()).isEqualTo("P102");
+        assertThat(result.getPatientName()).isEqualTo("新姓名");
+        assertThat(result.getBirthDate()).isEqualTo(LocalDate.of(1985, 2, 3));
+        assertThat(result.getOccupation()).isEqualTo("教师");
+        assertThat(result.getCurrentAddress()).isEqualTo("杭州市西湖区");
+        assertThat(result.getNativePlace()).isEqualTo("浙江");
+        assertThat(result.getConsanguinity()).isTrue();
+        verify(patientRepository).update(patient);
     }
 
     @Test

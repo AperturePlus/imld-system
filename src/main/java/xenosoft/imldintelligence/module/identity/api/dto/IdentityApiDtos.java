@@ -235,7 +235,14 @@ public final class IdentityApiDtos {
                 @Size(max = 32, message = "patientType must be at most 32 characters")
                 String patientType,
                 @Size(max = 32, message = "sourceChannel must be at most 32 characters")
-                String sourceChannel
+                String sourceChannel,
+                @Size(max = 100, message = "occupation must be at most 100 characters")
+                String occupation,
+                @Size(max = 500, message = "currentAddress must be at most 500 characters")
+                String currentAddress,
+                @Size(max = 200, message = "nativePlace must be at most 200 characters")
+                String nativePlace,
+                Boolean consanguinity
         ) {
         }
 

@@ -45,6 +45,12 @@ public interface ClinicalHistoryEntryRepository {
     List<ClinicalHistoryEntry> listByEncounterId(Long tenantId, Long encounterId);
 
     /**
+     * 按租户、就诊记录和病史类型查询最新一条病史记录。
+     */
+    Optional<ClinicalHistoryEntry> findLatestByEncounterIdAndType(
+            Long tenantId, Long encounterId, String historyType);
+
+    /**
      * 新增临床病史条目。
      *
      * @param clinicalHistoryEntry 待保存的临床病史条目

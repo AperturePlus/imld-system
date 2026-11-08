@@ -188,7 +188,7 @@ imld:
     imld:
       enabled: ${IMLD_INFERENCE_IMLD_ENABLED:true}
       desensitized-clinical-enabled: ${IMLD_INFERENCE_IMLD_DESENSITIZED_CLINICAL_ENABLED:true}
-      model-file-path: ${IMLD_INFERENCE_IMLD_MODEL_FILE_PATH:classpath:models/imld/imld_xgboost_model.deprecated.bin}
+      model-file-path: ${IMLD_INFERENCE_IMLD_MODEL_FILE_PATH:classpath:models/imld/imld_xgboost_model.bin}
       metadata-file-path: ${IMLD_INFERENCE_IMLD_METADATA_FILE_PATH:classpath:models/imld/imld_model_meta.json}
       model-version-fallback: ${IMLD_INFERENCE_IMLD_MODEL_VERSION_FALLBACK:v2_gene_clinical_fusion}
       engine: ${IMLD_INFERENCE_IMLD_ENGINE:xgboost-java}

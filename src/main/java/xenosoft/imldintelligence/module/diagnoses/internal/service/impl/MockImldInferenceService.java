@@ -234,7 +234,13 @@ public class MockImldInferenceService implements ImldInferenceService {
         return contributions.entrySet().stream()
                 .filter(entry -> Math.abs(entry.getValue()) > 1e-9)
                 .sorted((left, right) -> Double.compare(Math.abs(right.getValue()), Math.abs(left.getValue())))
-                .map(entry -> new ImldInferenceApiDtos.Response.FeatureContribution(entry.getKey(), round(entry.getValue(), 6)))
+                .map(entry -> new ImldInferenceApiDtos.Response.FeatureContribution(
+                        entry.getKey(),
+                        0.0,
+                        0.0,
+                        round(entry.getValue(), 6),
+                        entry.getValue() > 0 ? "POSITIVE" : "NEGATIVE",
+                        "MOCK_APPROXIMATION"))
                 .limit(8)
                 .toList();
     }

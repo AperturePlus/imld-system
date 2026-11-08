@@ -36,6 +36,15 @@ public interface DiagnosisResultRepository {
     List<DiagnosisResult> listBySessionId(Long tenantId, Long sessionId);
 
     /**
+     * 按租户和诊断会话主键集合批量查询诊断结果列表。
+     *
+     * @param tenantId 租户标识
+     * @param sessionIds 诊断会话主键集合
+     * @return 符合条件的诊断结果列表
+     */
+    List<DiagnosisResult> listBySessionIds(Long tenantId, List<Long> sessionIds);
+
+    /**
      * 新增诊断结果。
      *
      * @param diagnosisResult 待保存的诊断结果

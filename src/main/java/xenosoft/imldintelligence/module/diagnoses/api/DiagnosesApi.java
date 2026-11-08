@@ -14,6 +14,7 @@ import jakarta.validation.constraints.Positive;
 import xenosoft.imldintelligence.common.dto.ApiResponse;
 import xenosoft.imldintelligence.common.dto.PageQueryRequest;
 import xenosoft.imldintelligence.common.dto.PagedResultResponse;
+import xenosoft.imldintelligence.module.diagnoses.api.dto.DiagnosisTraceDtos;
 import xenosoft.imldintelligence.module.diagnoses.api.dto.DiagnosesApiDtos;
 
 /**
@@ -70,6 +71,19 @@ public interface DiagnosesApi {
             @Positive(message = "tenantId must be positive")
             Long tenantId,
             @Valid @RequestBody DiagnosesApiDtos.Request.SubmitDoctorFeedbackRequest request
+    );
+
+    /**
+     * 查询诊断决策链追溯信息。
+     */
+    @GetMapping("/sessions/{sessionId}/trace")
+    ApiResponse<DiagnosisTraceDtos.Response.DiagnosisTraceResponse> getSessionTrace(
+            @RequestHeader("X-Tenant-Id")
+            @Positive(message = "tenantId must be positive")
+            Long tenantId,
+            @PathVariable("sessionId")
+            @Positive(message = "sessionId must be positive")
+            Long sessionId
     );
 
     /**

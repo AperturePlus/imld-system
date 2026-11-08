@@ -7,6 +7,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
@@ -22,7 +23,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import xenosoft.imldintelligence.common.CheckPermission;
 import xenosoft.imldintelligence.common.dto.ApiResponse;
+import xenosoft.imldintelligence.module.audit.internal.aop.SensitiveAccessed;
 import xenosoft.imldintelligence.module.clinical.api.dto.PatientRecordApiDtos;
+import xenosoft.imldintelligence.module.clinical.api.dto.PatientRecordDetailDtos;
 import xenosoft.imldintelligence.module.clinical.internal.model.ClinicalHistoryEntry;
 import xenosoft.imldintelligence.module.clinical.internal.model.GeneticReport;
 import xenosoft.imldintelligence.module.clinical.internal.model.GeneticVariant;
@@ -35,6 +38,7 @@ import xenosoft.imldintelligence.module.clinical.internal.repository.GeneticVari
 import xenosoft.imldintelligence.module.clinical.internal.repository.ImagingReportRepository;
 import xenosoft.imldintelligence.module.clinical.internal.repository.IndicatorDictRepository;
 import xenosoft.imldintelligence.module.clinical.internal.repository.LabResultRepository;
+import xenosoft.imldintelligence.module.clinical.internal.service.PatientRecordQueryService;
 import xenosoft.imldintelligence.module.identity.api.dto.IdentityApiDtos;
 import xenosoft.imldintelligence.module.identity.internal.model.Encounter;
 import xenosoft.imldintelligence.module.identity.internal.model.Patient;
@@ -51,6 +55,7 @@ public class PatientRecordController implements PatientRecordControllerContract 
     private static final String HISTORY_TYPE_PRESENT_ILLNESS = "PRESENT_ILLNESS";
     private static final String HISTORY_TYPE_HISTORY = "PATIENT_HISTORY";
     private static final String HISTORY_TYPE_PHYSICAL_EXAM = "PHYSICAL_EXAM";
+    private static final String HISTORY_TYPE_LABORATORY_SCREENING = "LABORATORY_SCREENING";
     private static final String HISTORY_TYPE_PATHOLOGY = "PATHOLOGY";
     private static final String HISTORY_TYPE_CLINICAL_DECISION = "CLINICAL_DECISION";
 
@@ -65,6 +70,7 @@ public class PatientRecordController implements PatientRecordControllerContract 
     private final ClinicalHistoryEntryRepository clinicalHistoryEntryRepository;
     private final ObjectMapper objectMapper;
     private final CurrentUserSubjectProvider currentUserSubjectProvider;
+    private final PatientRecordQueryService patientRecordQueryService;
 
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -74,8 +80,10 @@ public class PatientRecordController implements PatientRecordControllerContract 
             PatientRecordApiDtos.Request.CreatePatientRecordRequest request) {
         validateRequest(request);
 
+        IdentityApiDtos.Request.CreatePatientRequest patientRequest = buildPatientRequest(request);
         Patient patient = patientRepository.findByPatientNo(tenantId, request.patientNo())
-                .orElseGet(() -> createPatient(tenantId, request));
+                .map(existing -> patientService.updatePatientProfile(tenantId, existing.getId(), patientRequest))
+                .orElseGet(() -> patientService.createPatient(tenantId, patientRequest));
         Long doctorId = resolveDoctorId(tenantId);
         Encounter encounter = resolveEncounter(tenantId, patient, request, doctorId);
 
@@ -90,6 +98,19 @@ public class PatientRecordController implements PatientRecordControllerContract 
         return ApiResponse.success(new PatientRecordApiDtos.Response.PatientRecordCreateResponse(recordId, visitId, "病历归档成功"));
     }
 
+    @Override
+    @CheckPermission(resource = "PATIENT", action = "READ")
+    @SensitiveAccessed(
+            sensitiveType = "PATIENT_RECORD",
+            resourceType = "PATIENT",
+            resourceIdExpression = "#p1",
+            reasonExpression = "'patient-record-detail'"
+    )
+    public ApiResponse<PatientRecordDetailDtos.Response.PatientRecordDetailResponse> getPatientRecord(
+            Long tenantId, String patientNo) {
+        return ApiResponse.success(patientRecordQueryService.getByPatientNo(tenantId, patientNo));
+    }
+
     private void validateRequest(PatientRecordApiDtos.Request.CreatePatientRecordRequest request) {
         if (request.clinicalDecision() == null || isBlank(request.clinicalDecision().diagnosis())) {
             throw new ResponseStatusException(BAD_REQUEST, "clinicalDecision.diagnosis is required");
@@ -102,19 +123,24 @@ public class PatientRecordController implements PatientRecordControllerContract 
         }
     }
 
-    private Patient createPatient(Long tenantId, PatientRecordApiDtos.Request.CreatePatientRecordRequest request) {
-        IdentityApiDtos.Request.CreatePatientRequest createPatientRequest =
-                new IdentityApiDtos.Request.CreatePatientRequest(
-                        request.patientNo(),
-                        request.name(),
-                        request.gender(),
-                        null,
-                        request.idCard(),
-                        request.phone(),
-                        normalizeEncounterType(request.encounterType()),
-                        normalizeSourceChannel(request.importMeta())
-                );
-        return patientService.createPatient(tenantId, createPatientRequest);
+    private IdentityApiDtos.Request.CreatePatientRequest buildPatientRequest(
+            PatientRecordApiDtos.Request.CreatePatientRecordRequest request) {
+        LocalDate visitDate = request.visitDate() == null ? LocalDate.now(ZoneOffset.UTC) : request.visitDate();
+        LocalDate birthDate = request.age() == null ? null : visitDate.minusYears(request.age());
+        return new IdentityApiDtos.Request.CreatePatientRequest(
+                request.patientNo(),
+                request.name(),
+                request.gender(),
+                birthDate,
+                request.idCard(),
+                request.phone(),
+                normalizeEncounterType(request.encounterType()),
+                normalizeSourceChannel(request.importMeta()),
+                trimToNull(request.occupation()),
+                trimToNull(request.currentAddress()),
+                trimToNull(request.nativePlace()),
+                request.consanguinity()
+        );
     }
 
     private Encounter resolveEncounter(
@@ -125,6 +151,9 @@ public class PatientRecordController implements PatientRecordControllerContract 
         String encounterNo = isBlank(request.visitId()) ? "VISIT-" + System.currentTimeMillis() : request.visitId().trim();
         Optional<Encounter> existing = encounterRepository.findByEncounterNo(tenantId, encounterNo);
         if (existing.isPresent()) {
+            if (!Objects.equals(existing.get().getPatientId(), patient.getId())) {
+                throw new ResponseStatusException(BAD_REQUEST, "visitId already belongs to another patient");
+            }
             return existing.get();
         }
 
@@ -154,6 +183,18 @@ public class PatientRecordController implements PatientRecordControllerContract 
         }
         if (request.physicalExam() != null && !request.physicalExam().isNull()) {
             saveClinicalHistoryEntry(tenantId, patientId, encounterId, doctorId, HISTORY_TYPE_PHYSICAL_EXAM, request.physicalExam(), sourceTypeOf(request.importMeta()), atStartOfDay(request.visitDate()));
+        }
+        if (request.laboratoryScreening() != null && !request.laboratoryScreening().isNull()) {
+            saveClinicalHistoryEntry(
+                    tenantId,
+                    patientId,
+                    encounterId,
+                    doctorId,
+                    HISTORY_TYPE_LABORATORY_SCREENING,
+                    request.laboratoryScreening(),
+                    sourceTypeOf(request.importMeta()),
+                    atStartOfDay(request.visitDate())
+            );
         }
         saveClinicalHistoryEntry(
                 tenantId,
@@ -229,6 +270,9 @@ public class PatientRecordController implements PatientRecordControllerContract 
         labResult.setValueText(valueText.trim());
         labResult.setSourceType(sourceType);
         labResult.setCollectedAt(atStartOfDay(visitDate));
+        ObjectNode rawData = objectMapper.createObjectNode();
+        rawData.put("sourcePath", path);
+        labResult.setRawData(rawData);
         labResultRepository.save(labResult);
     }
 
@@ -344,7 +388,12 @@ public class PatientRecordController implements PatientRecordControllerContract 
             JsonNode contentJson,
             String sourceType,
             OffsetDateTime recordedAt) {
-        ClinicalHistoryEntry entry = new ClinicalHistoryEntry();
+        ClinicalHistoryEntry entry = encounterId == null
+                ? new ClinicalHistoryEntry()
+                : clinicalHistoryEntryRepository
+                        .findLatestByEncounterIdAndType(tenantId, encounterId, historyType)
+                        .orElseGet(ClinicalHistoryEntry::new);
+        boolean existing = entry.getId() != null;
         entry.setTenantId(tenantId);
         entry.setPatientId(patientId);
         entry.setEncounterId(encounterId);
@@ -354,7 +403,11 @@ public class PatientRecordController implements PatientRecordControllerContract 
         entry.setSourceType(sourceType);
         entry.setRecordedBy(doctorId);
         entry.setRecordedAt(recordedAt == null ? now() : recordedAt);
-        clinicalHistoryEntryRepository.save(entry);
+        if (existing) {
+            clinicalHistoryEntryRepository.update(entry);
+        } else {
+            clinicalHistoryEntryRepository.save(entry);
+        }
     }
 
     private ObjectNode textNode(String field, String value) {

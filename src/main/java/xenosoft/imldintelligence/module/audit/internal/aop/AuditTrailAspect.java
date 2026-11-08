@@ -12,6 +12,8 @@ import org.springframework.expression.ExpressionParser;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Component;
+import xenosoft.imldintelligence.module.audit.internal.context.AuditContext;
+import xenosoft.imldintelligence.module.audit.internal.context.AuditContextHolder;
 import xenosoft.imldintelligence.module.audit.internal.service.AuditTrailService;
 import xenosoft.imldintelligence.module.audit.internal.service.command.AuditRecordCommand;
 import xenosoft.imldintelligence.module.audit.internal.service.command.SensitiveAccessRecordCommand;
@@ -59,7 +61,8 @@ public class AuditTrailAspect {
             command.setAction(auditedOperation.action());
             command.setResourceType(auditedOperation.resourceType());
             command.setResourceId(resourceId);
-            command.setTraceId(null);
+            AuditContext auditContext = AuditContextHolder.get();
+            command.setTraceId(auditContext == null ? null : auditContext.getTraceId());
 
             try {
                 auditTrailService.recordAudit(command);

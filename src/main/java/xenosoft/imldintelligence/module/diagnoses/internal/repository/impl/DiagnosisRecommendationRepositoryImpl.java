@@ -51,6 +51,18 @@ public class DiagnosisRecommendationRepositoryImpl implements DiagnosisRecommend
                 .orderByDesc(DiagnosisRecommendation::getId));
     }
 
+    @Override
+    public List<DiagnosisRecommendation> listBySessionIds(Long tenantId, List<Long> sessionIds) {
+        if (sessionIds == null || sessionIds.isEmpty()) {
+            return List.of();
+        }
+        return diagnosisRecommendationMapper.selectList(new LambdaQueryWrapper<DiagnosisRecommendation>()
+                .eq(DiagnosisRecommendation::getTenantId, tenantId)
+                .in(DiagnosisRecommendation::getSessionId, sessionIds)
+                .orderByAsc(DiagnosisRecommendation::getPriority)
+                .orderByDesc(DiagnosisRecommendation::getId));
+    }
+
     /**
      * {@inheritDoc}
      */
@@ -58,6 +70,17 @@ public class DiagnosisRecommendationRepositoryImpl implements DiagnosisRecommend
     public DiagnosisRecommendation save(DiagnosisRecommendation diagnosisRecommendation) {
         diagnosisRecommendationMapper.insert(diagnosisRecommendation);
         return diagnosisRecommendation;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public int saveBatch(List<DiagnosisRecommendation> recommendations) {
+        if (recommendations == null || recommendations.isEmpty()) {
+            return 0;
+        }
+        return diagnosisRecommendationMapper.insertBatch(recommendations);
     }
 
     /**

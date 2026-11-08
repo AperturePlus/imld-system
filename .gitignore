@@ -56,7 +56,9 @@ vendors/
 
 *.venv
 
-src/main/resources/models/imld/
+src/main/resources/models/imld/*
+!src/main/resources/models/imld/imld_xgboost_model.bin
+!src/main/resources/models/imld/imld_model_meta.json
 
 *README.md
 !/README.md

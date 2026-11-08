@@ -1,26 +1,20 @@
 package xenosoft.imldintelligence.module.diagnoses.api;
 
-import java.time.LocalDate;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
-import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
+import java.util.HexFormat;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import lombok.RequiredArgsConstructor;
@@ -28,16 +22,19 @@ import xenosoft.imldintelligence.common.RequireAnyRole;
 import xenosoft.imldintelligence.common.dto.ApiResponse;
 import xenosoft.imldintelligence.common.dto.PageQueryRequest;
 import xenosoft.imldintelligence.common.dto.PagedResultResponse;
-import xenosoft.imldintelligence.module.clinical.internal.model.ClinicalHistoryEntry;
-import xenosoft.imldintelligence.module.clinical.internal.model.GeneticReport;
-import xenosoft.imldintelligence.module.clinical.internal.model.LabResult;
-import xenosoft.imldintelligence.module.clinical.internal.repository.ClinicalHistoryEntryRepository;
-import xenosoft.imldintelligence.module.clinical.internal.repository.GeneticReportRepository;
-import xenosoft.imldintelligence.module.clinical.internal.repository.GeneticVariantRepository;
-import xenosoft.imldintelligence.module.clinical.internal.repository.LabResultRepository;
+import xenosoft.imldintelligence.module.audit.internal.aop.AuditedOperation;
+import xenosoft.imldintelligence.module.audit.internal.aop.SensitiveAccessed;
+import xenosoft.imldintelligence.module.audit.internal.context.AuditContext;
+import xenosoft.imldintelligence.module.audit.internal.context.AuditContextHolder;
+import xenosoft.imldintelligence.module.audit.internal.service.AuditTrailService;
+import xenosoft.imldintelligence.module.audit.internal.service.command.ModelInvocationRecordCommand;
+import xenosoft.imldintelligence.module.diagnoses.api.dto.DiagnosisTraceDtos;
 import xenosoft.imldintelligence.module.diagnoses.api.dto.DiagnosesApiDtos;
 import xenosoft.imldintelligence.module.diagnoses.api.dto.ImldInferenceApiDtos;
+import xenosoft.imldintelligence.module.diagnoses.internal.model.DiagnosisRecommendation;
+import xenosoft.imldintelligence.module.diagnoses.internal.model.DiagnosisResult;
 import xenosoft.imldintelligence.module.diagnoses.internal.model.DiagnosisSession;
+import xenosoft.imldintelligence.module.diagnoses.internal.model.DoctorFeedback;
 import xenosoft.imldintelligence.module.diagnoses.internal.model.ModelRegistry;
 import xenosoft.imldintelligence.module.diagnoses.internal.repository.DiagnosisRecommendationRepository;
 import xenosoft.imldintelligence.module.diagnoses.internal.repository.DiagnosisResultRepository;
@@ -47,6 +44,8 @@ import xenosoft.imldintelligence.module.diagnoses.internal.repository.ModelRegis
 import xenosoft.imldintelligence.module.diagnoses.internal.repository.query.DiagnosisSessionQuery;
 import xenosoft.imldintelligence.module.diagnoses.internal.repository.query.ModelRegistryQuery;
 import xenosoft.imldintelligence.module.diagnoses.internal.service.DiagnosesCommandService;
+import xenosoft.imldintelligence.module.diagnoses.internal.service.DiagnosisTraceService;
+import xenosoft.imldintelligence.module.diagnoses.internal.service.ImldFeatureBuilder;
 import xenosoft.imldintelligence.module.diagnoses.internal.service.ImldInferenceService;
 import xenosoft.imldintelligence.module.identity.internal.model.Encounter;
 import xenosoft.imldintelligence.module.identity.internal.model.Patient;
@@ -57,9 +56,13 @@ import xenosoft.imldintelligence.module.identity.internal.repository.PatientRepo
 import xenosoft.imldintelligence.module.identity.internal.repository.UserAccountRepository;
 import xenosoft.imldintelligence.module.identity.internal.security.CurrentUserSubjectProvider;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+
 @RestController
 @RequiredArgsConstructor
 public class DiagnosesController implements DiagnosesControllerContract {
+    private static final Logger LOG = LoggerFactory.getLogger(DiagnosesController.class);
     private static final int DEFAULT_PAGE = 0;
     private static final int DEFAULT_SIZE = 20;
     private static final String ROLE_DOCTOR = "DOCTOR";
@@ -72,15 +75,20 @@ public class DiagnosesController implements DiagnosesControllerContract {
     private final PatientRepository patientRepository;
     private final EncounterRepository encounterRepository;
     private final UserAccountRepository userAccountRepository;
-    private final LabResultRepository labResultRepository;
-    private final ClinicalHistoryEntryRepository clinicalHistoryEntryRepository;
-    private final GeneticReportRepository geneticReportRepository;
-    private final GeneticVariantRepository geneticVariantRepository;
     private final DiagnosesCommandService diagnosesCommandService;
     private final ImldInferenceService inferenceService;
-    private final ObjectMapper objectMapper;
+    private final ImldFeatureBuilder featureBuilder;
     private final CurrentUserSubjectProvider currentUserSubjectProvider;
+    private final AuditTrailService auditTrailService;
+    private final ObjectMapper objectMapper;
+    private final DiagnosisTraceService diagnosisTraceService;
 
+    /**
+     * 分页查询诊断会话。
+     *
+     * <p>先分页查询会话主表，再一次性批量查询结果、建议、反馈三个子表，
+     * 按会话标识分组后组装响应，避免逐条会话查询带来的 N+1 问题。</p>
+     */
     @Override
     @RequireAnyRole({ROLE_DOCTOR, ROLE_SYSTEM_ADMIN})
     public ApiResponse<PagedResultResponse<DiagnosesApiDtos.Response.DiagnosisSessionResponse>> listSessions(
@@ -106,9 +114,25 @@ public class DiagnosesController implements DiagnosesControllerContract {
 
         long total = sessionRepository.count(sessionQuery);
         long offset = (long) page * size;
-        List<DiagnosesApiDtos.Response.DiagnosisSessionResponse> items = sessionRepository
-                .query(sessionQuery, offset, size).stream()
-                .map(s -> toSessionResponse(tenantId, s))
+        List<DiagnosisSession> sessions = sessionRepository.query(sessionQuery, offset, size);
+
+        // 一次性批量查出三个子表，避免对每条 session 再逐条查询
+        List<Long> sessionIds = sessions.stream().map(DiagnosisSession::getId).toList();
+        Map<Long, List<DiagnosisResult>> resultsBySession = resultRepository
+                .listBySessionIds(tenantId, sessionIds).stream()
+                .collect(Collectors.groupingBy(DiagnosisResult::getSessionId));
+        Map<Long, List<DiagnosisRecommendation>> recsBySession = recommendationRepository
+                .listBySessionIds(tenantId, sessionIds).stream()
+                .collect(Collectors.groupingBy(DiagnosisRecommendation::getSessionId));
+        Map<Long, List<DoctorFeedback>> feedbacksBySession = feedbackRepository
+                .listBySessionIds(tenantId, sessionIds).stream()
+                .collect(Collectors.groupingBy(DoctorFeedback::getSessionId));
+
+        List<DiagnosesApiDtos.Response.DiagnosisSessionResponse> items = sessions.stream()
+                .map(s -> assembleSessionResponse(s,
+                        resultsBySession.getOrDefault(s.getId(), List.of()),
+                        recsBySession.getOrDefault(s.getId(), List.of()),
+                        feedbacksBySession.getOrDefault(s.getId(), List.of())))
                 .toList();
         return ApiResponse.success(new PagedResultResponse<>(page, size, total, items));
     }
@@ -123,6 +147,8 @@ public class DiagnosesController implements DiagnosesControllerContract {
 
     @Override
     @RequireAnyRole({ROLE_DOCTOR, ROLE_SYSTEM_ADMIN})
+    @AuditedOperation(action = "DIAGNOSIS_START", resourceType = "DIAGNOSIS_SESSION",
+            resourceIdExpression = "#result.data.id()")
     public ApiResponse<DiagnosesApiDtos.Response.DiagnosisSessionResponse> startSession(
             Long tenantId,
             DiagnosesApiDtos.Request.StartDiagnosisSessionRequest request) {
@@ -134,9 +160,11 @@ public class DiagnosesController implements DiagnosesControllerContract {
         Encounter encounter = resolveEncounter(tenantId, request.patientId(), request.encounterId());
         Long doctorId = resolveDoctorId(tenantId, request.doctorId(), encounter);
         ModelRegistry model = diagnosesCommandService.resolveModel(tenantId, request.modelRegistryId());
-        ObjectNode derivedSourceSnapshot = buildDerivedSourceSnapshot(tenantId, patient, encounter);
+        AuditContext auditContext = AuditContextHolder.get();
+        String traceId = auditContext == null ? null : auditContext.getTraceId();
+        ObjectNode derivedSourceSnapshot = featureBuilder.buildDerivedSourceSnapshot(tenantId, patient, encounter);
         ImldInferenceApiDtos.Request.ImldPredictRequest inferenceRequest =
-                buildInferenceRequest(tenantId, patient, encounter, request.inputSnapshot(), derivedSourceSnapshot);
+                featureBuilder.buildInferenceRequest(tenantId, patient, encounter, request.inputSnapshot(), derivedSourceSnapshot);
         DiagnosisSession session = diagnosesCommandService.createRunningSession(
                 tenantId,
                 patient.getId(),
@@ -144,26 +172,70 @@ public class DiagnosesController implements DiagnosesControllerContract {
                 doctorId,
                 model.getId(),
                 request.triggeredBy(),
-                buildSnapshot(request.inputSnapshot(), inferenceRequest, derivedSourceSnapshot)
+                traceId,
+                featureBuilder.buildSnapshot(request.inputSnapshot(), inferenceRequest, derivedSourceSnapshot)
         );
 
+        long started = System.currentTimeMillis();
+        ImldInferenceApiDtos.Response.PredictData prediction;
         try {
-            ImldInferenceApiDtos.Response.PredictData prediction = inferenceService.predict(inferenceRequest);
+            prediction = inferenceService.predict(inferenceRequest);
             session = diagnosesCommandService.completeSession(tenantId, session.getId(), prediction);
         } catch (RuntimeException ex) {
-            session = diagnosesCommandService.failSession(tenantId, session.getId());
+            try {
+                session = diagnosesCommandService.failSession(tenantId, session.getId());
+            } catch (RuntimeException persistEx) {
+                ex.addSuppressed(persistEx);
+            }
+            try {
+                recordModelInvocation(tenantId, session, model, traceId, inferenceRequest, null,
+                        elapsedMillis(started), "FAILED", ex.getClass().getSimpleName());
+            } catch (RuntimeException auditEx) {
+                ex.addSuppressed(auditEx);
+            }
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "IMLD inference failed", ex);
+        }
+        try {
+            recordModelInvocation(tenantId, session, model, traceId, inferenceRequest, prediction,
+                    elapsedMillis(started), "SUCCESS", null);
+        } catch (RuntimeException auditEx) {
+            // 模型调用已完成，审计写入失败不能把已完成的诊断会话改写成 FAILED。
+            LOG.error("Failed to persist successful model invocation audit for session {}", session.getId(), auditEx);
         }
         return ApiResponse.success(toSessionResponse(tenantId, session));
     }
 
     @Override
     @RequireAnyRole({ROLE_DOCTOR, ROLE_SYSTEM_ADMIN})
+    @AuditedOperation(action = "DIAGNOSIS_FEEDBACK", resourceType = "DIAGNOSIS_SESSION",
+            resourceIdExpression = "#result.data.id()")
     public ApiResponse<DiagnosesApiDtos.Response.DiagnosisSessionResponse> submitDoctorFeedback(
             Long tenantId,
             DiagnosesApiDtos.Request.SubmitDoctorFeedbackRequest request) {
         DiagnosisSession session = diagnosesCommandService.submitDoctorFeedback(tenantId, request);
         return ApiResponse.success(toSessionResponse(tenantId, session));
+    }
+
+    /**
+     * 查询诊断决策链追溯信息。
+     *
+     * <p>聚合会话、模型、诊断结果、医生反馈、模型调用日志和审计日志，
+     * 供合规审计和问题追溯使用。</p>
+     */
+    @Override
+    @RequireAnyRole({ROLE_DOCTOR, ROLE_SYSTEM_ADMIN})
+    @SensitiveAccessed(
+            sensitiveType = "DIAGNOSIS_TRACE",
+            resourceType = "DIAGNOSIS_SESSION",
+            resourceIdExpression = "#p1",
+            reasonExpression = "'diagnosis-decision-trace'"
+    )
+    public ApiResponse<DiagnosisTraceDtos.Response.DiagnosisTraceResponse> getSessionTrace(
+            Long tenantId, Long sessionId) {
+        DiagnosisTraceDtos.Response.DiagnosisTraceResponse trace =
+                diagnosisTraceService.getTrace(tenantId, sessionId);
+        enforceTraceAccess(trace.session());
+        return ApiResponse.success(trace);
     }
 
     @Override
@@ -204,16 +276,39 @@ public class DiagnosesController implements DiagnosesControllerContract {
     }
 
     private DiagnosesApiDtos.Response.DiagnosisSessionResponse toSessionResponse(Long tenantId, DiagnosisSession s) {
+        return assembleSessionResponse(s,
+                resultRepository.listBySessionId(tenantId, s.getId()),
+                recommendationRepository.listBySessionId(tenantId, s.getId()),
+                feedbackRepository.listBySessionId(tenantId, s.getId()));
+    }
+
+    /**
+     * 组装单个诊断会话的响应。
+     *
+     * <p>结果、建议、反馈由调用方传入，便于批量查询场景复用同一组装入口，
+     * 避免在循环内重复查询子表。</p>
+     */
+    private DiagnosesApiDtos.Response.DiagnosisSessionResponse assembleSessionResponse(
+            DiagnosisSession s,
+            List<DiagnosisResult> results,
+            List<DiagnosisRecommendation> recommendations,
+            List<DoctorFeedback> feedbacks) {
         return new DiagnosesApiDtos.Response.DiagnosisSessionResponse(
                 s.getId(), s.getPatientId(), s.getEncounterId(), s.getDoctorId(), s.getTriggeredBy(), s.getModelRegistryId(),
                 s.getStatus(), s.getStartedAt(), s.getCompletedAt(),
-                resultRepository.listBySessionId(tenantId, s.getId()).stream().map(r -> new DiagnosesApiDtos.Shared.DiagnosisResultItem(
+                results.stream().map(r -> new DiagnosesApiDtos.Shared.DiagnosisResultItem(
                         r.getId(), r.getDiseaseCode(), r.getDiseaseName(), r.getConfidence(), r.getRankNo(), r.getRiskLevel(),
                         r.getEvidenceJson(), r.getIsDisplayToPatient(), r.getCreatedAt())).toList(),
-                recommendationRepository.listBySessionId(tenantId, s.getId()).stream().map(r -> new DiagnosesApiDtos.Shared.DiagnosisRecommendationItem(
+                recommendations.stream().map(r -> new DiagnosesApiDtos.Shared.DiagnosisRecommendationItem(
                         r.getId(), r.getRecType(), r.getContent(), r.getPriority(), r.getReason(), r.getCreatedAt())).toList(),
-                feedbackRepository.listBySessionId(tenantId, s.getId()).stream().map(f -> new DiagnosesApiDtos.Shared.DoctorFeedbackItem(
-                        f.getId(), f.getResultId(), f.getDoctorId(), f.getAction(), f.getModifiedValue(), f.getRejectReason(), f.getCreatedAt())).toList()
+                feedbacks.stream().map(f -> new DiagnosesApiDtos.Shared.DoctorFeedbackItem(
+                        f.getId(),
+                        f.getResultId(),
+                        f.getDoctorId(),
+                        f.getAction(),
+                        f.getModifiedValue(),
+                        f.getRejectReason(),
+                        f.getCreatedAt())).toList()
         );
     }
 
@@ -251,302 +346,55 @@ public class DiagnosesController implements DiagnosesControllerContract {
                         HttpStatus.BAD_REQUEST, "No authenticated doctor to attribute session to"));
     }
 
-    private ImldInferenceApiDtos.Request.ImldPredictRequest buildInferenceRequest(
-            Long tenantId, Patient patient, Encounter encounter, JsonNode input, ObjectNode derivedSourceSnapshot) {
-        JsonNode n = input != null && input.has("inference_input") ? input.get("inference_input") : input;
-        List<LabResult> labs = encounter != null ? labResultRepository.listByEncounterId(tenantId, encounter.getId())
-                : labResultRepository.listByPatientId(tenantId, patient.getId());
-        if (labs.isEmpty()) labs = labResultRepository.listByPatientId(tenantId, patient.getId());
-        int age = clamp(intOf(n, "age").orElse(ageOf(patient)), 1, 120);
-        int gender = clamp(intOf(n, "gender").orElse(genderFlag(patient.getGender())), 0, 1);
-        double alt = Math.max(0D, doubleOf(n, "ALT", "alt").orElse(indicatorValue(labs, Set.of("ALT", "GPT")).orElse(45D)));
-        double bilirubin = Math.max(0D, doubleOf(n, "bilirubin", "TBIL").orElse(indicatorValue(labs, Set.of("TBIL", "BILIRUBIN")).orElse(21D)));
-        double ceruloplasmin = Math.max(0D, doubleOf(n, "ceruloplasmin", "CP").orElse(indicatorValue(labs, Set.of("CERULOPLASMIN", "CP")).orElse(180D)));
-        int jaundice = clamp(intOf(n, "jaundice").orElse(0), 0, 1);
-        Integer nasScore = intOf(n, "nasScore", "nas_score").orElseGet(() -> pathologyNasScore(derivedSourceSnapshot));
-        List<ImldInferenceApiDtos.Request.GeneVariant> geneVariants = geneVariants(tenantId, patient.getId(), encounter, n);
-        Map<String, Double> clinicalFeatures = buildClinicalFeatures(
-                tenantId, patient, encounter, n, labs, derivedSourceSnapshot, age, gender, alt, bilirubin, ceruloplasmin, nasScore
-        );
-        return new ImldInferenceApiDtos.Request.ImldPredictRequest(age, gender, alt, bilirubin, ceruloplasmin, jaundice, nasScore, geneVariants,
-                clinicalFeatures,
-                patient.getPatientNo() == null ? String.valueOf(patient.getId()) : patient.getPatientNo());
-    }
-
-    private Map<String, Double> buildClinicalFeatures(
-            Long tenantId,
-            Patient patient,
-            Encounter encounter,
-            JsonNode input,
-            List<LabResult> labs,
-            ObjectNode derivedSourceSnapshot,
-            int age,
-            int gender,
-            double alt,
-            double bilirubin,
-            double ceruloplasmin,
-            Integer nasScore) {
-        Map<String, Double> features = new LinkedHashMap<>();
-        putFeature(features, "age", (double) age);
-        putFeature(features, "gender", (double) gender);
-        putFeature(features, "ALT(U/L)", alt);
-        putFeature(features, "TBIL(μmol/L)", bilirubin);
-        putFeature(features, "ceruloplasmin", ceruloplasmin);
-        if (nasScore != null) {
-            putFeature(features, "NAS", nasScore.doubleValue());
-        }
-
-        copyClinicalFeaturesFromInput(features, input);
-        copyClinicalFeaturesFromLabs(features, labs);
-        copyClinicalFeaturesFromHistory(features, findLatestClinicalHistoryEntry(tenantId, patient.getId(), encounter, "PATIENT_HISTORY").map(ClinicalHistoryEntry::getContentJson).orElse(null));
-        Integer derivedNas = pathologyNasScore(derivedSourceSnapshot);
-        if (derivedNas != null && !features.containsKey("NAS")) {
-            putFeature(features, "NAS", derivedNas.doubleValue());
-        }
-        return features;
-    }
-
-    private void copyClinicalFeaturesFromInput(Map<String, Double> features, JsonNode input) {
-        JsonNode clinicalFeatures = input != null && input.has("clinical_features") ? input.get("clinical_features") : null;
-        if (clinicalFeatures == null || !clinicalFeatures.isObject()) {
+    private void enforceTraceAccess(DiagnosisTraceDtos.Response.SessionTrace session) {
+        UserSubject currentUser = currentUserSubjectProvider.requireCurrentSubject();
+        if (currentUser.roleCodes().contains(ROLE_SYSTEM_ADMIN)) {
             return;
         }
-        clinicalFeatures.properties().forEach(entry -> {
-            JsonNode value = entry.getValue();
-            if (value != null && value.isNumber()) {
-                putFeature(features, entry.getKey(), value.asDouble());
-            }
-        });
-    }
-
-    private void copyClinicalFeaturesFromLabs(Map<String, Double> features, List<LabResult> labs) {
-        putLabFeature(features, labs, "TBIL(μmol/L)", "TBIL", "BILIRUBIN");
-        putLabFeature(features, labs, "DBIL(μmol/L)", "DBIL");
-        putLabFeature(features, labs, "IBIL(μmol/L)", "IBIL");
-        putLabFeature(features, labs, "ALT(U/L)", "ALT", "GPT");
-        putLabFeature(features, labs, "AST(U/L)", "AST", "GOT");
-        putLabFeature(features, labs, "TP(g/L)", "TP");
-        putLabFeature(features, labs, "ALB(g/L)", "ALB");
-        putLabFeature(features, labs, "GLB(g/L)", "GLB", "GLOB");
-        putLabFeature(features, labs, "GLU(mmol/L)", "GLU");
-        putLabFeature(features, labs, "URIC(μmol/L)", "URIC", "UA");
-        putLabFeature(features, labs, "TG(mmol/L)", "TG");
-        putLabFeature(features, labs, "CHOL(mmol/L)", "CHOL", "TC");
-        putLabFeature(features, labs, "HDL-C(mmol/L)", "HDL_C", "HDL-C", "HDLC");
-        putLabFeature(features, labs, "LDL-C(mmol/L)", "LDL_C", "LDL-C", "LDLC");
-        putLabFeature(features, labs, "ALP(U/L)", "ALP");
-        putLabFeature(features, labs, "GGT(U/L)", "GGT");
-        putLabFeature(features, labs, "TBA(μmol/L)", "TBA");
-        putLabFeature(features, labs, "NH3(μmol/L)", "NH3");
-        putLabFeature(features, labs, "PLT(10^9/L)", "PLT");
-        putLabFeature(features, labs, "WBC(10^9/L)", "WBC");
-        putLabFeature(features, labs, "ceruloplasmin", "CERULOPLASMIN", "CER", "CP");
-        putLabFeature(features, labs, "PIVKA（mAU/mL）", "PIVKA", "PIVKAII", "PIVKA_II");
-        putLabFeature(features, labs, "PT(s)", "PT");
-        putLabFeature(features, labs, "INR", "INR");
-        putLabFeature(features, labs, "CRP(mg/L)", "CRP");
-        putLabFeature(features, labs, "IgG(g/L)", "IGG");
-        putLabFeature(features, labs, "IgA(g/L)", "IGA");
-        putLabFeature(features, labs, "IgM(g/L)", "IGM");
-    }
-
-    private void copyClinicalFeaturesFromHistory(Map<String, Double> features, JsonNode history) {
-        JsonNode diseaseHistory = history == null ? null : history.get("diseaseHistory");
-        if (diseaseHistory == null || !diseaseHistory.isObject()) {
-            return;
+        if (session == null || !Objects.equals(session.doctorId(), currentUser.userId())) {
+            throw new AccessDeniedException("Doctors may only access traces for their own diagnosis sessions");
         }
-        putFlagFeature(features, diseaseHistory, "Smoking", "smokingHistory");
-        putFlagFeature(features, diseaseHistory, "Drinking", "drinkingHistory");
-        putFlagFeature(features, diseaseHistory, "糖尿病病史", "diabetesHistory");
-        putFlagFeature(features, diseaseHistory, "高血压病史", "hypertensionHistory");
-        putFlagFeature(features, diseaseHistory, "高尿酸血症病史", "hyperuricemiaHistory");
-        putFlagFeature(features, diseaseHistory, "高脂血症病史", "hyperlipidemiaHistory");
-        putFlagFeature(features, diseaseHistory, "乙肝病史", "hepatitisBHistory");
     }
 
-    private void putLabFeature(Map<String, Double> features, List<LabResult> labs, String feature, String... aliases) {
-        indicatorValue(labs, Set.of(aliases)).ifPresent(value -> putFeature(features, feature, value));
+    /**
+     * 记录一次模型调用审计日志。
+     */
+    private void recordModelInvocation(Long tenantId, DiagnosisSession session, ModelRegistry model,
+                                       String traceId, Object input, Object output,
+                                       int latencyMs, String status, String errorMessage) {
+        ModelInvocationRecordCommand command = new ModelInvocationRecordCommand();
+        command.setTenantId(tenantId);
+        command.setSessionId(session.getId());
+        command.setModelRegistryId(model.getId());
+        command.setProvider(model.getProvider());
+        command.setRequestId(traceId);
+        command.setTraceId(traceId);
+        command.setInputDigest(sha256Hex(input));
+        command.setOutputDigest(sha256Hex(output));
+        command.setLatencyMs(latencyMs);
+        command.setStatus(status);
+        command.setErrorMessage(errorMessage);
+        auditTrailService.recordModelInvocation(command);
     }
 
-    private void putFlagFeature(Map<String, Double> features, JsonNode diseaseHistory, String feature, String key) {
-        JsonNode value = diseaseHistory.get(key);
-        if (value == null || value.isNull()) {
-            return;
-        }
-        String normalized = value.asText("").trim().toUpperCase(Locale.ROOT);
-        if (normalized.isEmpty() || "UNKNOWN".equals(normalized)) {
-            return;
-        }
-        putFeature(features, feature, normalized.equals("YES") || normalized.equals("Y") || normalized.equals("TRUE") || normalized.equals("1") ? 1D : 0D);
-    }
-
-    private void putFeature(Map<String, Double> features, String feature, Double value) {
-        if (feature == null || feature.isBlank() || value == null || value.isNaN() || value.isInfinite()) {
-            return;
-        }
-        features.put(feature, value);
-    }
-
-    private List<ImldInferenceApiDtos.Request.GeneVariant> geneVariants(Long tenantId, Long patientId, Encounter encounter, JsonNode n) {
-        JsonNode array = n != null && n.has("gene_variants") ? n.get("gene_variants") : n != null ? n.get("geneVariants") : null;
-        if (array != null && array.isArray()) {
-            List<ImldInferenceApiDtos.Request.GeneVariant> variants = new ArrayList<>();
-            for (JsonNode item : array) {
-                variants.add(new ImldInferenceApiDtos.Request.GeneVariant(
-                        strOf(item, "gene").orElse("UNKNOWN"),
-                        strOf(item, "c_change", "cChange").orElse(null),
-                        strOf(item, "p_change", "pChange").orElse(null),
-                        strOf(item, "variant_type", "variantType").map(String::toLowerCase).orElse("unknown"),
-                        strOf(item, "zygosity").map(String::toLowerCase).orElse("unknown"),
-                        strOf(item, "pathogenicity", "classification").map(String::toLowerCase).orElse("unknown"),
-                        doubleOf(item, "allele_frequency", "alleleFrequency").orElse(null)
-                ));
-            }
-            return variants;
-        }
-        List<GeneticReport> reports = encounter != null ? geneticReportRepository.listByEncounterId(tenantId, encounter.getId())
-                : geneticReportRepository.listByPatientId(tenantId, patientId);
-        Optional<GeneticReport> latest = reports.stream().sorted(Comparator.comparing(GeneticReport::getCreatedAt).reversed()).findFirst();
-        if (latest.isEmpty()) return List.of();
-        return geneticVariantRepository.listByReportId(tenantId, latest.get().getId()).stream()
-                .map(v -> new ImldInferenceApiDtos.Request.GeneVariant(
-                        v.getGene(), v.getHgvsC(), v.getHgvsP(), normalize(v.getVariantType(), "unknown").toLowerCase(Locale.ROOT),
-                        normalize(v.getZygosity(), "unknown").toLowerCase(Locale.ROOT),
-                        normalize(v.getClassification(), "unknown").toLowerCase(Locale.ROOT), null
-                )).toList();
-    }
-
-    private ObjectNode buildDerivedSourceSnapshot(Long tenantId, Patient patient, Encounter encounter) {
-        ObjectNode derived = objectMapper.createObjectNode();
-        findLatestPathologyEntry(tenantId, patient.getId(), encounter).ifPresent(entry -> {
-            ObjectNode pathology = objectMapper.createObjectNode();
-            JsonNode content = entry.getContentJson();
-            if (content != null && content.get("reportText") != null && !content.get("reportText").isNull()) {
-                pathology.put("reportText", content.get("reportText").asText());
-            }
-            if (content != null && content.get("nasScore") != null && !content.get("nasScore").isNull()) {
-                pathology.put("nasScore", content.get("nasScore").asInt());
-            }
-            if (content != null && content.get("reportedAt") != null && !content.get("reportedAt").isNull()) {
-                pathology.put("reportedAt", content.get("reportedAt").asText());
-            }
-            derived.set("pathology", pathology);
-        });
-        return derived;
-    }
-
-    private Optional<ClinicalHistoryEntry> findLatestPathologyEntry(Long tenantId, Long patientId, Encounter encounter) {
-        return findLatestClinicalHistoryEntry(tenantId, patientId, encounter, "PATHOLOGY");
-    }
-
-    private Optional<ClinicalHistoryEntry> findLatestClinicalHistoryEntry(Long tenantId, Long patientId, Encounter encounter, String historyType) {
-        List<ClinicalHistoryEntry> entries = encounter != null
-                ? clinicalHistoryEntryRepository.listByEncounterId(tenantId, encounter.getId())
-                : clinicalHistoryEntryRepository.listByPatientId(tenantId, patientId);
-        return entries.stream()
-                .filter(entry -> historyType.equalsIgnoreCase(entry.getHistoryType()))
-                .sorted(Comparator.comparing((ClinicalHistoryEntry entry) -> entry.getRecordedAt() != null ? entry.getRecordedAt() : now()).reversed()
-                        .thenComparing(ClinicalHistoryEntry::getId, Comparator.reverseOrder()))
-                .findFirst();
-    }
-
-    private Integer pathologyNasScore(ObjectNode derivedSourceSnapshot) {
-        if (derivedSourceSnapshot == null || derivedSourceSnapshot.get("pathology") == null) {
+    /**
+     * 对请求或响应对象计算 SHA-256 摘要，避免审计日志保存明文。
+     */
+    private String sha256Hex(Object value) {
+        if (value == null) {
             return null;
         }
-        JsonNode pathology = derivedSourceSnapshot.get("pathology");
-        return pathology != null && pathology.get("nasScore") != null && !pathology.get("nasScore").isNull()
-                ? pathology.get("nasScore").asInt()
-                : null;
-    }
-
-    private void mergeSourceSnapshot(ObjectNode target, ObjectNode derived) {
-        if (target == null || derived == null) {
-            return;
+        try {
+            byte[] payload = objectMapper.writeValueAsString(value).getBytes(StandardCharsets.UTF_8);
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(payload);
+            return HexFormat.of().formatHex(digest);
+        } catch (Exception ex) {
+            return null;
         }
-
-        target.setAll(derived);
     }
 
-    private JsonNode buildSnapshot(JsonNode input,
-                                   ImldInferenceApiDtos.Request.ImldPredictRequest inferenceRequest,
-                                   ObjectNode derivedSourceSnapshot) {
-        if (input != null && input.has("inference_input")) {
-            if (input.isObject() && derivedSourceSnapshot != null && !derivedSourceSnapshot.isEmpty()) {
-                ObjectNode snapshot = ((ObjectNode) input).deepCopy();
-                ObjectNode sourceSnapshot = snapshot.has("source_snapshot") && snapshot.get("source_snapshot").isObject()
-                        ? (ObjectNode) snapshot.get("source_snapshot")
-                        : objectMapper.createObjectNode();
-                mergeSourceSnapshot(sourceSnapshot, derivedSourceSnapshot);
-                snapshot.set("source_snapshot", sourceSnapshot);
-                return snapshot;
-            }
-            return input;
-        }
-        ObjectNode node = objectMapper.createObjectNode();
-        ObjectNode sourceSnapshot = input != null && input.isObject() ? ((ObjectNode) input).deepCopy() : objectMapper.createObjectNode();
-        mergeSourceSnapshot(sourceSnapshot, derivedSourceSnapshot);
-        if (!sourceSnapshot.isEmpty()) {
-            node.set("source_snapshot", sourceSnapshot);
-        }
-        node.set("inference_input", objectMapper.valueToTree(inferenceRequest));
-        return node;
+    private int elapsedMillis(long startedAt) {
+        return (int) Math.min(Integer.MAX_VALUE, Math.max(0L, System.currentTimeMillis() - startedAt));
     }
 
-    private int ageOf(Patient patient) {
-        LocalDate birth = patient.getBirthDate();
-        return birth == null ? 40 : (int) ChronoUnit.YEARS.between(birth, LocalDate.now(ZoneOffset.UTC));
-    }
-
-    private int genderFlag(String gender) {
-        String n = normalize(gender, "1").toLowerCase(Locale.ROOT);
-        return n.equals("0") || n.equals("f") || n.equals("female") || n.equals("女") ? 0 : 1;
-    }
-
-    private Optional<Double> indicatorValue(List<LabResult> labs, Set<String> aliases) {
-        Set<String> normalizedAliases = aliases.stream().map(s -> s.toUpperCase(Locale.ROOT)).collect(Collectors.toSet());
-        return labs.stream()
-                .filter(l -> l.getIndicatorCode() != null && normalizedAliases.contains(l.getIndicatorCode().toUpperCase(Locale.ROOT)))
-                .map(LabResult::getValueNumeric).filter(Objects::nonNull).findFirst();
-    }
-
-    private Optional<String> strOf(JsonNode node, String... keys) {
-        if (node == null) return Optional.empty();
-        for (String key : keys) {
-            JsonNode value = node.get(key);
-            if (value != null && !value.isNull() && !value.asText().isBlank()) return Optional.of(value.asText().trim());
-        }
-        return Optional.empty();
-    }
-
-    private Optional<Integer> intOf(JsonNode node, String... keys) {
-        return strOf(node, keys).flatMap(value -> {
-            try { return Optional.of(Integer.valueOf(value)); } catch (NumberFormatException ignored) { return Optional.empty(); }
-        });
-    }
-
-    private Optional<Double> doubleOf(JsonNode node, String... keys) {
-        return strOf(node, keys).flatMap(value -> {
-            try { return Optional.of(Double.valueOf(value)); } catch (NumberFormatException ignored) { return Optional.empty(); }
-        });
-    }
-
-    private String normalize(String value, String fallback) {
-        String trimmed = trimToNull(value);
-        return trimmed == null ? fallback : trimmed.toUpperCase(Locale.ROOT);
-    }
-
-    private String trimToNull(String value) {
-        if (value == null) return null;
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
-    }
-
-    private OffsetDateTime now() {
-        return OffsetDateTime.now(ZoneOffset.UTC).withNano(0);
-    }
-
-    private int clamp(int value, int min, int max) {
-        return Math.max(min, Math.min(max, value));
-    }
 }

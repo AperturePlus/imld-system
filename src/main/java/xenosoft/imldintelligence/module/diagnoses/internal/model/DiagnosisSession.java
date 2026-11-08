@@ -23,6 +23,7 @@ public class DiagnosisSession {
     private String status;
     private java.time.OffsetDateTime startedAt;
     private java.time.OffsetDateTime completedAt;
+    private String traceId;
     private java.time.OffsetDateTime createdAt;
 
 }

@@ -55,6 +55,21 @@ public class DiagnosisResultRepositoryImpl implements DiagnosisResultRepository 
      * {@inheritDoc}
      */
     @Override
+    public List<DiagnosisResult> listBySessionIds(Long tenantId, List<Long> sessionIds) {
+        if (sessionIds == null || sessionIds.isEmpty()) {
+            return List.of();
+        }
+        return diagnosisResultMapper.selectList(new LambdaQueryWrapper<DiagnosisResult>()
+                .eq(DiagnosisResult::getTenantId, tenantId)
+                .in(DiagnosisResult::getSessionId, sessionIds)
+                .orderByAsc(DiagnosisResult::getRankNo)
+                .orderByDesc(DiagnosisResult::getId));
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
     public DiagnosisResult save(DiagnosisResult diagnosisResult) {
         diagnosisResultMapper.insert(diagnosisResult);
         return diagnosisResult;

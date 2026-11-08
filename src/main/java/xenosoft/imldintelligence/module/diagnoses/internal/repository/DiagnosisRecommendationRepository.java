@@ -36,12 +36,25 @@ public interface DiagnosisRecommendationRepository {
     List<DiagnosisRecommendation> listBySessionId(Long tenantId, Long sessionId);
 
     /**
+     * 按租户和诊断会话主键集合批量查询诊断建议列表。
+     */
+    List<DiagnosisRecommendation> listBySessionIds(Long tenantId, List<Long> sessionIds);
+
+    /**
      * 新增诊断建议。
      *
      * @param diagnosisRecommendation 待保存的诊断建议
      * @return 保存后的诊断建议
      */
     DiagnosisRecommendation save(DiagnosisRecommendation diagnosisRecommendation);
+
+    /**
+     * 批量新增诊断建议。
+     *
+     * @param recommendations 待保存的诊断建议列表
+     * @return 实际插入的记录数
+     */
+    int saveBatch(List<DiagnosisRecommendation> recommendations);
 
     /**
      * 更新诊断建议。

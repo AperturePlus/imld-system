@@ -16,8 +16,11 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequiredArgsConstructor
@@ -32,12 +35,19 @@ public class WebPatientController implements WebPatientControllerContract {
     @Override
     public ApiResponse<WebPatientApiDtos.Response.PatientListResponse> listPatients(Long tenantId, String keyword) {
         String normalizedKeyword = trimToNull(keyword);
-        List<WebPatientApiDtos.Response.PatientSummary> items = patientRepository.listByTenantId(tenantId).stream()
+        List<Patient> patients = patientRepository.listByTenantId(tenantId).stream()
                 .filter(patient -> "ACTIVE".equalsIgnoreCase(patient.getStatus()))
                 .filter(patient -> matchesKeyword(patient, normalizedKeyword))
                 .sorted(Comparator.comparing(Patient::getPatientNo, Comparator.nullsLast(String::compareTo)))
+                .toList();
+
+        Map<Long, PatientDiagnosisSummary> diagnosisByPatient =
+                buildDiagnosisSummaries(tenantId, patients.stream().map(Patient::getId).toList());
+
+        List<WebPatientApiDtos.Response.PatientSummary> items = patients.stream()
                 .map(patient -> {
-                    PatientDiagnosisSummary diagnosis = resolveDiagnosisSummary(tenantId, patient);
+                    PatientDiagnosisSummary diagnosis = diagnosisByPatient.getOrDefault(
+                            patient.getId(), new PatientDiagnosisSummary(STATUS_UNDIAGNOSED, null));
                     return new WebPatientApiDtos.Response.PatientSummary(
                             patient.getPatientNo(),
                             patient.getPatientName(),
@@ -64,24 +74,54 @@ public class WebPatientController implements WebPatientControllerContract {
         return value != null && value.toLowerCase(Locale.ROOT).contains(normalizedKeyword);
     }
 
-    private PatientDiagnosisSummary resolveDiagnosisSummary(Long tenantId, Patient patient) {
-        String riskLevel = diagnosisSessionRepository.listByPatientId(tenantId, patient.getId()).stream()
-                .filter(this::isAuthoritativeDiagnosisSession)
-                .sorted(Comparator
-                        .comparing(this::diagnosisSessionSortTime,
-                                Comparator.nullsLast(Comparator.naturalOrder()))
-                        .reversed()
-                        .thenComparing(DiagnosisSession::getId, Comparator.nullsLast(Comparator.reverseOrder())))
-                .flatMap(session -> diagnosisResultRepository.listBySessionId(tenantId, session.getId()).stream())
-                .findFirst()
-                .map(DiagnosisResult::getRiskLevel)
-                .map(this::toFrontendRiskLevel)
-                .orElse(null);
-
-        if (riskLevel == null) {
-            return new PatientDiagnosisSummary(STATUS_UNDIAGNOSED, null);
+    /**
+     * 批量构建患者诊断摘要。
+     *
+     * <p>一次查询患者会话、一次查询会话结果，再在内存中按患者分组取最新风险等级，
+     * 避免对每个患者分别查询数据库。</p>
+     */
+    private Map<Long, PatientDiagnosisSummary> buildDiagnosisSummaries(Long tenantId, List<Long> patientIds) {
+        if (patientIds.isEmpty()) {
+            return Map.of();
         }
-        return new PatientDiagnosisSummary(STATUS_DIAGNOSED, riskLevel);
+
+        // 一次查出这些患者的所有权威会话（COMPLETED/REVIEWED）
+        List<DiagnosisSession> sessions = diagnosisSessionRepository
+                .listByPatientIds(tenantId, patientIds).stream()
+                .filter(this::isAuthoritativeDiagnosisSession)
+                .toList();
+
+        // 一次查出这些会话的所有结果
+        List<Long> sessionIds = sessions.stream().map(DiagnosisSession::getId).toList();
+        Map<Long, List<DiagnosisResult>> resultsBySession = diagnosisResultRepository
+                .listBySessionIds(tenantId, sessionIds).stream()
+                .collect(Collectors.groupingBy(DiagnosisResult::getSessionId));
+
+        Map<Long, List<DiagnosisSession>> sessionsByPatient =
+                sessions.stream().collect(Collectors.groupingBy(DiagnosisSession::getPatientId));
+
+        Map<Long, PatientDiagnosisSummary> summaries = new HashMap<>();
+        for (Map.Entry<Long, List<DiagnosisSession>> entry : sessionsByPatient.entrySet()) {
+            DiagnosisSession latest = entry.getValue().stream()
+                    .max(Comparator
+                            .comparing(this::diagnosisSessionSortTime, Comparator.nullsLast(Comparator.naturalOrder()))
+                            .thenComparing(DiagnosisSession::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                    .orElse(null);
+            if (latest == null) {
+                continue;
+            }
+            String riskLevel = resultsBySession.getOrDefault(latest.getId(), List.of()).stream()
+                    .map(DiagnosisResult::getRiskLevel)
+                    .map(this::toFrontendRiskLevel)
+                    .findFirst()
+                    .orElse(null);
+            if (riskLevel == null) {
+                summaries.put(entry.getKey(), new PatientDiagnosisSummary(STATUS_UNDIAGNOSED, null));
+            } else {
+                summaries.put(entry.getKey(), new PatientDiagnosisSummary(STATUS_DIAGNOSED, riskLevel));
+            }
+        }
+        return summaries;
     }
 
     private OffsetDateTime diagnosisSessionSortTime(DiagnosisSession session) {

@@ -75,4 +75,25 @@ class AuditContextFilterTest {
 
         filter.doFilter(request, response, chain);
     }
+
+    @Test
+    void shouldReplaceUnsafeTraceId() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(AuditHeaderNames.TRACE_ID, "x".repeat(65));
+        request.setRemoteAddr("127.0.0.1");
+
+        MockFilterChain chain = new MockFilterChain(new HttpServlet() {
+            @Override
+            protected void service(HttpServletRequest req, HttpServletResponse resp) {
+                AuditContext context = AuditContextHolder.get();
+                assertThat(context).isNotNull();
+                assertThat(context.getTraceId())
+                        .isNotBlank()
+                        .isNotEqualTo("x".repeat(65))
+                        .hasSizeLessThanOrEqualTo(64);
+            }
+        });
+
+        filter.doFilter(request, new MockHttpServletResponse(), chain);
+    }
 }

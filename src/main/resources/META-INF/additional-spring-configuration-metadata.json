@@ -136,7 +136,7 @@
 			"name": "imld.inference.imld.model-file-path",
 			"type": "java.lang.String",
 			"description": "Path to Java-loadable XGBoost model file.",
-			"defaultValue": "classpath:models/imld/imld_xgboost_model.deprecated.bin"
+			"defaultValue": "classpath:models/imld/imld_xgboost_model.bin"
 		},
 		{
 			"name": "imld.inference.imld.metadata-file-path",

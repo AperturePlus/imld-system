@@ -8,6 +8,7 @@ import xenosoft.imldintelligence.module.diagnoses.api.dto.DiagnosesApiDtos;
 import xenosoft.imldintelligence.module.diagnoses.internal.model.DiagnosisResult;
 import xenosoft.imldintelligence.module.diagnoses.internal.model.DiagnosisSession;
 import xenosoft.imldintelligence.module.diagnoses.internal.model.DoctorFeedback;
+import xenosoft.imldintelligence.module.diagnoses.internal.model.ModelRegistry;
 import xenosoft.imldintelligence.module.diagnoses.internal.repository.DiagnosisRecommendationRepository;
 import xenosoft.imldintelligence.module.diagnoses.internal.repository.DiagnosisResultRepository;
 import xenosoft.imldintelligence.module.diagnoses.internal.repository.DiagnosisSessionRepository;
@@ -39,6 +40,7 @@ class DiagnosesCommandServiceDoctorAttributionTest {
     private DiagnosisResultRepository resultRepository;
     private DoctorFeedbackRepository feedbackRepository;
     private UserAccountRepository userAccountRepository;
+    private ModelRegistryRepository modelRegistryRepository;
     private RecordingSubjectProvider subjectProvider;
 
     private DiagnosesCommandService service;
@@ -50,8 +52,7 @@ class DiagnosesCommandServiceDoctorAttributionTest {
         feedbackRepository = mock(DoctorFeedbackRepository.class);
         @SuppressWarnings("unused")
         DiagnosisRecommendationRepository recommendationRepository = mock(DiagnosisRecommendationRepository.class);
-        @SuppressWarnings("unused")
-        ModelRegistryRepository modelRegistryRepository = mock(ModelRegistryRepository.class);
+        modelRegistryRepository = mock(ModelRegistryRepository.class);
         userAccountRepository = mock(UserAccountRepository.class);
         subjectProvider = new RecordingSubjectProvider();
 
@@ -102,6 +103,27 @@ class DiagnosesCommandServiceDoctorAttributionTest {
         assertThat(captor.getValue().getDoctorId())
                 .as("feedback must be attributed to the authenticated doctor, not an arbitrary tenant user")
                 .isEqualTo(CURRENT_DOCTOR_ID);
+    }
+
+    @Test
+    void resolveModelUsesConflictSafeInsertAndReturnsPersistedModel() {
+        ModelRegistry existing = new ModelRegistry();
+        existing.setId(9L);
+        existing.setTenantId(TENANT_ID);
+        existing.setModelCode("IMLD_XGBOOST");
+        existing.setModelVersion("v2_gene_clinical_fusion");
+        existing.setStatus("ACTIVE");
+
+        when(modelRegistryRepository.listByTenantId(TENANT_ID)).thenReturn(List.of());
+        when(modelRegistryRepository.findByModelCodeAndModelVersion(
+                TENANT_ID, "IMLD_XGBOOST", "v2_gene_clinical_fusion"))
+                .thenReturn(Optional.empty(), Optional.of(existing));
+        when(modelRegistryRepository.saveIfAbsent(any(ModelRegistry.class))).thenReturn(false);
+
+        ModelRegistry result = service.resolveModel(TENANT_ID, null);
+
+        assertThat(result).isSameAs(existing);
+        verify(modelRegistryRepository).saveIfAbsent(any(ModelRegistry.class));
     }
 
     private UserAccount activeUser(Long id) {

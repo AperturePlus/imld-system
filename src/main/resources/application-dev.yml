@@ -80,3 +80,9 @@ imld:
   inference:
     imld:
       engine: mock
+
+# 开发环境无 SMTP 服务，关闭邮件健康检查，避免整体健康状态被误判为 DOWN。
+management:
+  health:
+    mail:
+      enabled: false

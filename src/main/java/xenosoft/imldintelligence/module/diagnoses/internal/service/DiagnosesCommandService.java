@@ -27,6 +27,7 @@ import xenosoft.imldintelligence.module.identity.internal.security.CurrentUserSu
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -83,8 +84,10 @@ public class DiagnosesCommandService {
         created.setProvider("LOCAL");
         created.setStatus("ACTIVE");
         created.setReleasedAt(now());
-        modelRegistryRepository.save(created);
-        return created;
+        modelRegistryRepository.saveIfAbsent(created);
+        return modelRegistryRepository.findByModelCodeAndModelVersion(
+                        tenantId, "IMLD_XGBOOST", "v2_gene_clinical_fusion")
+                .orElseThrow(() -> new IllegalStateException("Failed to create or load built-in model registry"));
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -94,6 +97,7 @@ public class DiagnosesCommandService {
                                                  Long doctorId,
                                                  Long modelRegistryId,
                                                  String triggeredBy,
+                                                 String traceId,
                                                  com.fasterxml.jackson.databind.JsonNode snapshot) {
         DiagnosisSession session = new DiagnosisSession();
         session.setTenantId(tenantId);
@@ -105,6 +109,7 @@ public class DiagnosesCommandService {
         session.setInputSnapshot(snapshot);
         session.setStatus(STATUS_RUNNING);
         session.setStartedAt(now());
+        session.setTraceId(traceId);
         sessionRepository.save(session);
         return session;
     }
@@ -225,6 +230,7 @@ public class DiagnosesCommandService {
         resultRepository.save(result);
 
         List<String> suggestions = p.suggestions() == null ? List.of() : p.suggestions();
+        List<DiagnosisRecommendation> recommendations = new ArrayList<>();
         int priority = 10;
         for (String suggestion : suggestions) {
             if (suggestion == null || suggestion.isBlank()) continue;
@@ -235,9 +241,10 @@ public class DiagnosesCommandService {
             rec.setContent(suggestion);
             rec.setPriority(priority);
             rec.setReason("IMLD_MODEL");
-            recommendationRepository.save(rec);
+            recommendations.add(rec);
             priority += 10;
         }
+        recommendationRepository.saveBatch(recommendations);
     }
 
     private String recType(String text) {

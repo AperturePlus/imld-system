@@ -14,6 +14,9 @@ public interface PatientService {
 
     Patient createPatient(Long tenantId, IdentityApiDtos.Request.CreatePatientRequest request);
 
+    Patient updatePatientProfile(Long tenantId, Long patientId,
+                                 IdentityApiDtos.Request.CreatePatientRequest request);
+
     Patient bindExternalId(Long tenantId, Long patientId,
                            IdentityApiDtos.Request.BindExternalIdRequest request);
 }

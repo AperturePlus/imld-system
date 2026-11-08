@@ -61,6 +61,17 @@ public class DoctorFeedbackRepositoryImpl implements DoctorFeedbackRepository {
                 .orderByDesc(DoctorFeedback::getId));
     }
 
+    @Override
+    public List<DoctorFeedback> listBySessionIds(Long tenantId, List<Long> sessionIds) {
+        if (sessionIds == null || sessionIds.isEmpty()) {
+            return List.of();
+        }
+        return doctorFeedbackMapper.selectList(new LambdaQueryWrapper<DoctorFeedback>()
+                .eq(DoctorFeedback::getTenantId, tenantId)
+                .in(DoctorFeedback::getSessionId, sessionIds)
+                .orderByDesc(DoctorFeedback::getId));
+    }
+
     /**
      * {@inheritDoc}
      */

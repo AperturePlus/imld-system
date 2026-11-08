@@ -9,6 +9,8 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.context.SecurityContextHolder;
+import xenosoft.imldintelligence.module.audit.internal.context.AuditContext;
+import xenosoft.imldintelligence.module.audit.internal.context.AuditContextHolder;
 import xenosoft.imldintelligence.module.identity.internal.model.UserSubject;
 
 import java.util.Optional;
@@ -32,6 +34,7 @@ class TenantHeaderInterceptorTest {
     @AfterEach
     void cleanup() {
         SecurityContextHolder.clearContext();
+        AuditContextHolder.clear();
     }
 
     @Test
@@ -109,6 +112,28 @@ class TenantHeaderInterceptorTest {
         boolean proceed = interceptor.preHandle(request, response, new Object());
 
         assertThat(proceed).isTrue();
+    }
+
+    @Test
+    void overwritesSpoofedAuditIdentityWithAuthenticatedSubject() {
+        subjectProvider.subject = Optional.of(
+                new UserSubject(88L, 66L, "DOCTOR", "Neurology", Set.of("DOCTOR")));
+        AuditContext auditContext = new AuditContext();
+        auditContext.setTenantId(77L);
+        auditContext.setUserId(999L);
+        auditContext.setUserRole("SYSTEM_ADMIN");
+        AuditContextHolder.set(auditContext);
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(TENANT_HEADER, "66");
+        request.addHeader("X-User-Id", "999");
+        request.addHeader("X-User-Role", "SYSTEM_ADMIN");
+
+        interceptor.preHandle(request, new MockHttpServletResponse(), new Object());
+
+        assertThat(auditContext.getTenantId()).isEqualTo(66L);
+        assertThat(auditContext.getUserId()).isEqualTo(88L);
+        assertThat(auditContext.getUserRole()).isEqualTo("DOCTOR");
     }
 
     /** Minimal stub of CurrentUserSubjectProvider so tests need no Spring context. */

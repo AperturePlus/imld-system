@@ -66,6 +66,14 @@ public interface ModelRegistryRepository {
     ModelRegistry save(ModelRegistry modelRegistry);
 
     /**
+     * 并发安全地保存模型注册信息，记录已存在时不抛出唯一约束异常。
+     *
+     * @param modelRegistry 待保存的模型注册信息
+     * @return 实际新增记录时返回 {@code true}
+     */
+    boolean saveIfAbsent(ModelRegistry modelRegistry);
+
+    /**
      * 更新模型注册信息。
      *
      * @param modelRegistry 待更新的模型注册信息

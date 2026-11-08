@@ -94,6 +94,14 @@ public class ModelRegistryRepositoryImpl implements ModelRegistryRepository {
      * {@inheritDoc}
      */
     @Override
+    public boolean saveIfAbsent(ModelRegistry modelRegistry) {
+        return modelRegistryMapper.insertIfAbsent(modelRegistry) > 0;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
     public ModelRegistry update(ModelRegistry modelRegistry) {
         modelRegistryMapper.update(modelRegistry, new LambdaUpdateWrapper<ModelRegistry>()
                 .eq(ModelRegistry::getTenantId, modelRegistry.getTenantId())

@@ -95,16 +95,21 @@ public final class PatientRecordApiDtos {
                 String name,
                 @Size(max = 16, message = "gender must be at most 16 characters")
                 String gender,
+                @Min(value = 0, message = "age must be at least 0")
+                @Max(value = 130, message = "age must be at most 130")
                 Integer age,
                 @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
                 LocalDate visitDate,
                 String phone,
                 String idCard,
                 @NotBlank(message = "occupation must not be blank")
+                @Size(max = 100, message = "occupation must be at most 100 characters")
                 String occupation,
                 @NotBlank(message = "currentAddress must not be blank")
+                @Size(max = 500, message = "currentAddress must be at most 500 characters")
                 String currentAddress,
                 @NotBlank(message = "nativePlace must not be blank")
+                @Size(max = 200, message = "nativePlace must be at most 200 characters")
                 String nativePlace,
                 @NotBlank(message = "department must not be blank")
                 String department,

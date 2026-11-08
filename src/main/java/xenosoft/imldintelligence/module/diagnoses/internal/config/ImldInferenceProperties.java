@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 public class ImldInferenceProperties {
     private boolean enabled = true;
     private boolean desensitizedClinicalEnabled = true;
-    private String modelFilePath = "classpath:models/imld/imld_xgboost_model.deprecated.bin";
+    private String modelFilePath = "classpath:models/imld/imld_xgboost_model.bin";
     private String metadataFilePath = "classpath:models/imld/imld_model_meta.json";
     private String modelVersionFallback = "v2_gene_clinical_fusion";
     private String engine = "xgboost-java";

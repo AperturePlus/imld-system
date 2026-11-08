@@ -45,21 +45,58 @@ public class PatientServiceImpl implements PatientService {
         Patient patient = new Patient();
         patient.setTenantId(tenantId);
         patient.setPatientNo(request.patientNo());
-        patient.setPatientName(request.patientName());
-        patient.setGender(request.gender());
-        patient.setBirthDate(request.birthDate());
         patient.setPatientType(request.patientType());
         patient.setStatus("ACTIVE");
         patient.setSourceChannel(request.sourceChannel() != null ? request.sourceChannel() : "HOSPITAL");
+        applyPatientProfile(patient, request, true);
+        return patientRepository.save(patient);
+    }
 
+    @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public Patient updatePatientProfile(Long tenantId, Long patientId,
+                                        IdentityApiDtos.Request.CreatePatientRequest request) {
+        Patient patient = patientRepository.findById(tenantId, patientId)
+                .orElseThrow(() -> new IllegalArgumentException("Patient not found: " + patientId));
+        applyPatientProfile(patient, request, false);
+        return patientRepository.update(patient);
+    }
+
+    private void applyPatientProfile(Patient patient,
+                                     IdentityApiDtos.Request.CreatePatientRequest request,
+                                     boolean includeIdentity) {
+        if (includeIdentity) {
+            patient.setPatientName(request.patientName());
+            patient.setGender(request.gender());
+        } else {
+            if (request.patientName() != null && !request.patientName().isBlank()) {
+                patient.setPatientName(request.patientName());
+            }
+            if (request.gender() != null && !request.gender().isBlank()) {
+                patient.setGender(request.gender());
+            }
+        }
+        if (request.birthDate() != null) {
+            patient.setBirthDate(request.birthDate());
+        }
         if (request.idNoPlaintext() != null && !request.idNoPlaintext().isBlank()) {
             patient.setIdNoEncrypted(sensitiveDataEncryptor.encrypt(request.idNoPlaintext()));
         }
         if (request.mobilePlaintext() != null && !request.mobilePlaintext().isBlank()) {
             patient.setMobileEncrypted(sensitiveDataEncryptor.encrypt(request.mobilePlaintext()));
         }
+        patient.setOccupation(trimToNull(request.occupation()));
+        patient.setCurrentAddress(trimToNull(request.currentAddress()));
+        patient.setNativePlace(trimToNull(request.nativePlace()));
+        patient.setConsanguinity(request.consanguinity());
+    }
 
-        return patientRepository.save(patient);
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     @Override

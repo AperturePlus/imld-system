@@ -20,6 +20,10 @@ public class Patient {
     private LocalDate birthDate;
     private String idNoEncrypted;     // 加密后的身份证号
     private String mobileEncrypted;   // 加密后的手机号
+    private String occupation;
+    private String currentAddress;
+    private String nativePlace;
+    private Boolean consanguinity;
     private String patientType;       // INPATIENT/OUTPATIENT
     private String status;
     private String sourceChannel;     // HOSPITAL
@@ -38,6 +42,10 @@ public class Patient {
  *     birth_date              DATE,
  *     id_no_encrypted         VARCHAR(255),
  *     mobile_encrypted        VARCHAR(255),
+ *     occupation              VARCHAR(100),
+ *     current_address         VARCHAR(500),
+ *     native_place            VARCHAR(200),
+ *     consanguinity           BOOLEAN,
  *     patient_type            VARCHAR(32) NOT NULL,             -- INPATIENT/OUTPATIENT
  *     status                  VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
  *     source_channel          VARCHAR(32) NOT NULL DEFAULT 'HOSPITAL', -- HOSPITAL

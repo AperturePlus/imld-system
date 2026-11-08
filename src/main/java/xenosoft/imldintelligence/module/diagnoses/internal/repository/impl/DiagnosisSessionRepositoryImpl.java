@@ -51,6 +51,17 @@ public class DiagnosisSessionRepositoryImpl implements DiagnosisSessionRepositor
                 .orderByDesc(DiagnosisSession::getId));
     }
 
+    @Override
+    public List<DiagnosisSession> listByPatientIds(Long tenantId, List<Long> patientIds) {
+        if (patientIds == null || patientIds.isEmpty()) {
+            return List.of();
+        }
+        return diagnosisSessionMapper.selectList(new LambdaQueryWrapper<DiagnosisSession>()
+                .eq(DiagnosisSession::getTenantId, tenantId)
+                .in(DiagnosisSession::getPatientId, patientIds)
+                .orderByDesc(DiagnosisSession::getId));
+    }
+
     /**
      * {@inheritDoc}
      */

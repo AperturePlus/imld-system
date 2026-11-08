@@ -50,6 +50,19 @@ public class ClinicalHistoryEntryRepositoryImpl implements ClinicalHistoryEntryR
     }
 
     @Override
+    public Optional<ClinicalHistoryEntry> findLatestByEncounterIdAndType(
+            Long tenantId, Long encounterId, String historyType) {
+        return Optional.ofNullable(clinicalHistoryEntryMapper.selectOne(
+                new LambdaQueryWrapper<ClinicalHistoryEntry>()
+                        .eq(ClinicalHistoryEntry::getTenantId, tenantId)
+                        .eq(ClinicalHistoryEntry::getEncounterId, encounterId)
+                        .eq(ClinicalHistoryEntry::getHistoryType, historyType)
+                        .orderByDesc(ClinicalHistoryEntry::getRecordedAt)
+                        .orderByDesc(ClinicalHistoryEntry::getId)
+                        .last("LIMIT 1")));
+    }
+
+    @Override
     public ClinicalHistoryEntry save(ClinicalHistoryEntry clinicalHistoryEntry) {
         clinicalHistoryEntryMapper.insert(clinicalHistoryEntry);
         return clinicalHistoryEntry;

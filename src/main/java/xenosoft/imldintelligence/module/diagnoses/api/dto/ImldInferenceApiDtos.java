@@ -124,9 +124,19 @@ public final class ImldInferenceApiDtos {
         ) {
         }
 
+        /**
+         * 特征贡献度。
+         *
+         * <p>除原始贡献值外，额外给出特征值、训练集基线和贡献方向，
+         * 便于医生理解模型为何判定高风险或低风险。</p>
+         */
         public record FeatureContribution(
                 String feature,
-                double contribution
+                double featureValue,
+                double baseline,
+                double contribution,
+                String direction,
+                String method
         ) {
         }
 

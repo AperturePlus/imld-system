@@ -45,6 +45,15 @@ public interface DoctorFeedbackRepository {
     List<DoctorFeedback> listByResultId(Long tenantId, Long resultId);
 
     /**
+     * 按租户和诊断会话主键集合批量查询医生反馈列表。
+     *
+     * @param tenantId 租户标识
+     * @param sessionIds 诊断会话主键集合
+     * @return 符合条件的医生反馈列表
+     */
+    List<DoctorFeedback> listBySessionIds(Long tenantId, List<Long> sessionIds);
+
+    /**
      * 新增医生反馈。
      *
      * @param doctorFeedback 待保存的医生反馈
