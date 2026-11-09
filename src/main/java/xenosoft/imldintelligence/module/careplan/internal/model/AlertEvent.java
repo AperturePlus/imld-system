@@ -15,6 +15,8 @@ public class AlertEvent{
     private Long tenantId;
     private Long patientId;
     private Long carePlanId;
+    private Long sourceSessionId;
+    private Long sourceResultId;
     private String triggerType;
     @TableField(typeHandler = JsonNodeTypeHandler.class)
     private JsonNode triggerDetail;
@@ -31,6 +33,8 @@ public class AlertEvent{
                              tenant_id               BIGINT NOT NULL REFERENCES tenant(id),
                              patient_id              BIGINT NOT NULL REFERENCES patient(id),
                              care_plan_id            BIGINT REFERENCES care_plan(id),
+                             source_session_id       BIGINT,
+                             source_result_id        BIGINT,
                              trigger_type            VARCHAR(32) NOT NULL,             -- THRESHOLD/MISSED_FOLLOWUP/CUSTOM
                              trigger_detail          JSONB,
                              severity                VARCHAR(16) NOT NULL,             -- INFO/WARNING/CRITICAL

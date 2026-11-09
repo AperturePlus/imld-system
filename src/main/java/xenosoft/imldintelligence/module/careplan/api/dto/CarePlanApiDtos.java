@@ -178,6 +178,27 @@ public final class CarePlanApiDtos {
                 String resolutionNote
         ) {
         }
+
+        /**
+         * 从高危预警直接建立随访计划和首个随访任务。
+         */
+        public record CreateFollowupFromAlertRequest(
+                @Size(max = 64, message = "diseaseCode must be at most 64 characters")
+                String diseaseCode,
+                @Size(max = 64, message = "planType must be at most 64 characters")
+                String planType,
+                LocalDate startDate,
+                LocalDate endDate,
+                @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+                OffsetDateTime scheduledAt,
+                @Size(max = 32, message = "taskType must be at most 32 characters")
+                String taskType,
+                @Size(max = 32, message = "channel must be at most 32 characters")
+                String channel,
+                @Size(max = 500, message = "note must be at most 500 characters")
+                String note
+        ) {
+        }
     }
 
     /**
@@ -229,7 +250,11 @@ public final class CarePlanApiDtos {
         public record AlertEventResponse(
                 Long id,
                 Long patientId,
+                String patientNo,
+                String patientName,
                 Long carePlanId,
+                Long sourceSessionId,
+                Long sourceResultId,
                 String triggerType,
                 JsonNode triggerDetail,
                 String severity,
@@ -239,6 +264,16 @@ public final class CarePlanApiDtos {
                 OffsetDateTime resolvedAt,
                 String resolutionNote,
                 List<Shared.AlertActionItem> actions
+        ) {
+        }
+
+        /**
+         * 从预警建立随访后的响应。
+         */
+        public record CreateFollowupFromAlertResponse(
+                CarePlanResponse carePlan,
+                FollowupTaskResponse task,
+                AlertEventResponse alert
         ) {
         }
 

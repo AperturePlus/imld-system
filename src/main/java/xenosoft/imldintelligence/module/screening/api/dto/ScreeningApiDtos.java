@@ -239,7 +239,13 @@ public final class ScreeningApiDtos {
                 String name,
                 Integer age,
                 String clue,
-                String aiSuggest
+                String aiSuggest,
+                Long alertId,
+                Long patientId,
+                String patientNo,
+                Long diagnosisSessionId,
+                Long resultId,
+                Boolean phoneAvailable
         ) {
         }
     }

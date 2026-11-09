@@ -62,6 +62,15 @@ public class AlertEventRepositoryImpl implements AlertEventRepository {
                 .orderByDesc(AlertEvent::getId));
     }
 
+    @Override
+    public Optional<AlertEvent> findBySourceSessionId(Long tenantId, Long sessionId, Long resultId) {
+        return Optional.ofNullable(alertEventMapper.selectOne(new LambdaQueryWrapper<AlertEvent>()
+                .eq(AlertEvent::getTenantId, tenantId)
+                .eq(AlertEvent::getSourceSessionId, sessionId)
+                .eq(AlertEvent::getSourceResultId, resultId)
+                .last("LIMIT 1")));
+    }
+
     /**
      * {@inheritDoc}
      */
@@ -69,6 +78,11 @@ public class AlertEventRepositoryImpl implements AlertEventRepository {
     public AlertEvent save(AlertEvent alertEvent) {
         alertEventMapper.insert(alertEvent);
         return alertEvent;
+    }
+
+    @Override
+    public boolean saveIfAbsent(AlertEvent alertEvent) {
+        return alertEventMapper.insertIfAbsent(alertEvent) > 0;
     }
 
     /**
@@ -99,6 +113,15 @@ public class AlertEventRepositoryImpl implements AlertEventRepository {
                 .set(AlertEvent::getResolutionNote, resolutionNote)
                 .set(AlertEvent::getAssignedTo, assignedTo);
         return alertEventMapper.update(null, wrapper) > 0;
+    }
+
+    @Override
+    public boolean linkCarePlan(Long tenantId, Long id, Long carePlanId, Long assignedTo) {
+        return alertEventMapper.update(null, new LambdaUpdateWrapper<AlertEvent>()
+                .eq(AlertEvent::getTenantId, tenantId)
+                .eq(AlertEvent::getId, id)
+                .set(AlertEvent::getCarePlanId, carePlanId)
+                .set(AlertEvent::getAssignedTo, assignedTo)) > 0;
     }
 
     /**

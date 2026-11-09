@@ -2,6 +2,7 @@ package xenosoft.imldintelligence.module.api;
 
 import org.junit.jupiter.api.Test;
 import xenosoft.imldintelligence.module.careplan.api.CarePlanApi;
+import xenosoft.imldintelligence.module.careplan.api.CarePlanController;
 import xenosoft.imldintelligence.module.careplan.api.CarePlanControllerContract;
 import xenosoft.imldintelligence.module.clinical.api.ClinicalApi;
 import xenosoft.imldintelligence.module.clinical.api.ClinicalControllerContract;
@@ -14,6 +15,7 @@ import xenosoft.imldintelligence.module.integration.api.IntegrationControllerCon
 import xenosoft.imldintelligence.module.license.api.LicenseApi;
 import xenosoft.imldintelligence.module.license.api.LicenseControllerContract;
 import xenosoft.imldintelligence.module.notify.api.NotifyApi;
+import xenosoft.imldintelligence.module.notify.api.NotifyController;
 import xenosoft.imldintelligence.module.notify.api.NotifyControllerContract;
 import xenosoft.imldintelligence.module.payment.api.PaymentApi;
 import xenosoft.imldintelligence.module.payment.api.PaymentControllerContract;
@@ -43,5 +45,11 @@ class ControllerContractCatalogTest {
         assertThat(PaymentApi.class).isAssignableFrom(PaymentControllerContract.class);
         assertThat(ReportApi.class).isAssignableFrom(ReportControllerContract.class);
         assertThat(ScreeningApi.class).isAssignableFrom(ScreeningControllerContract.class);
+    }
+
+    @Test
+    void carePlanAndNotifyContractsHaveConcreteControllers() {
+        assertThat(CarePlanControllerContract.class).isAssignableFrom(CarePlanController.class);
+        assertThat(NotifyControllerContract.class).isAssignableFrom(NotifyController.class);
     }
 }

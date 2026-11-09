@@ -46,12 +46,22 @@ public interface AlertEventRepository {
     List<AlertEvent> listByPatientId(Long tenantId, Long patientId);
 
     /**
+     * 按诊断会话和诊断结果查询已生成的告警。
+     */
+    Optional<AlertEvent> findBySourceSessionId(Long tenantId, Long sessionId, Long resultId);
+
+    /**
      * 新增预警事件。
      *
      * @param alertEvent 待保存的预警事件
      * @return 保存后的预警事件
      */
     AlertEvent save(AlertEvent alertEvent);
+
+    /**
+     * 按租户、诊断会话和诊断结果幂等新增告警。
+     */
+    boolean saveIfAbsent(AlertEvent alertEvent);
 
     /**
      * 更新预警事件。
@@ -80,6 +90,11 @@ public interface AlertEventRepository {
                                   OffsetDateTime resolvedAt,
                                   String resolutionNote,
                                   Long assignedTo);
+
+    /**
+     * 关联随访计划并更新处理人。
+     */
+    boolean linkCarePlan(Long tenantId, Long id, Long carePlanId, Long assignedTo);
 
     /**
      * 按租户和预警事件主键删除预警事件。

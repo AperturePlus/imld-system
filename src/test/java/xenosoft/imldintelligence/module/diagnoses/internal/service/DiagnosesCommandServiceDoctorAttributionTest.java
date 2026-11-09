@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import xenosoft.imldintelligence.module.diagnoses.api.dto.DiagnosesApiDtos;
+import xenosoft.imldintelligence.module.careplan.api.service.ClinicalAlertService;
 import xenosoft.imldintelligence.module.diagnoses.internal.model.DiagnosisResult;
 import xenosoft.imldintelligence.module.diagnoses.internal.model.DiagnosisSession;
 import xenosoft.imldintelligence.module.diagnoses.internal.model.DoctorFeedback;
@@ -41,6 +42,7 @@ class DiagnosesCommandServiceDoctorAttributionTest {
     private DoctorFeedbackRepository feedbackRepository;
     private UserAccountRepository userAccountRepository;
     private ModelRegistryRepository modelRegistryRepository;
+    private ClinicalAlertService clinicalAlertService;
     private RecordingSubjectProvider subjectProvider;
 
     private DiagnosesCommandService service;
@@ -53,6 +55,7 @@ class DiagnosesCommandServiceDoctorAttributionTest {
         @SuppressWarnings("unused")
         DiagnosisRecommendationRepository recommendationRepository = mock(DiagnosisRecommendationRepository.class);
         modelRegistryRepository = mock(ModelRegistryRepository.class);
+        clinicalAlertService = mock(ClinicalAlertService.class);
         userAccountRepository = mock(UserAccountRepository.class);
         subjectProvider = new RecordingSubjectProvider();
 
@@ -64,7 +67,8 @@ class DiagnosesCommandServiceDoctorAttributionTest {
                 modelRegistryRepository,
                 userAccountRepository,
                 new ObjectMapper(),
-                subjectProvider
+                subjectProvider,
+                clinicalAlertService
         );
     }
 

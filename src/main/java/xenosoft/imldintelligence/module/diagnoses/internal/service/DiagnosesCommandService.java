@@ -3,6 +3,7 @@ package xenosoft.imldintelligence.module.diagnoses.internal.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -10,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import xenosoft.imldintelligence.module.diagnoses.api.dto.DiagnosesApiDtos;
 import xenosoft.imldintelligence.module.diagnoses.api.dto.ImldInferenceApiDtos;
+import xenosoft.imldintelligence.module.careplan.api.service.ClinicalAlertService;
 import xenosoft.imldintelligence.module.diagnoses.internal.model.DiagnosisRecommendation;
 import xenosoft.imldintelligence.module.diagnoses.internal.model.DiagnosisResult;
 import xenosoft.imldintelligence.module.diagnoses.internal.model.DiagnosisSession;
@@ -35,6 +37,7 @@ import java.util.Optional;
 import java.util.Set;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED)
 public class DiagnosesCommandService {
@@ -51,6 +54,7 @@ public class DiagnosesCommandService {
     private final UserAccountRepository userAccountRepository;
     private final ObjectMapper objectMapper;
     private final CurrentUserSubjectProvider currentUserSubjectProvider;
+    private final ClinicalAlertService clinicalAlertService;
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public ModelRegistry resolveModel(Long tenantId, Long modelRegistryId) {
@@ -120,10 +124,25 @@ public class DiagnosesCommandService {
                                             ImldInferenceApiDtos.Response.PredictData prediction) {
         DiagnosisSession session = sessionRepository.findById(tenantId, sessionId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Diagnosis session not found"));
-        savePrediction(tenantId, session, prediction);
+        DiagnosisResult result = savePrediction(tenantId, session, prediction);
         session.setStatus(STATUS_COMPLETED);
         session.setCompletedAt(now());
         sessionRepository.update(session);
+        try {
+            clinicalAlertService.recordDiagnosisAlert(
+                    tenantId,
+                    session.getPatientId(),
+                    session.getId(),
+                    result.getId(),
+                    session.getDoctorId(),
+                    result.getDiseaseCode(),
+                    result.getDiseaseName(),
+                    result.getRiskLevel(),
+                    result.getConfidence() == null ? 0D : result.getConfidence()
+            );
+        } catch (RuntimeException ex) {
+            log.warn("Failed to generate high-risk alert for diagnosis session {}", session.getId(), ex);
+        }
         return session;
     }
 
@@ -202,10 +221,16 @@ public class DiagnosesCommandService {
                         HttpStatus.BAD_REQUEST, "No authenticated doctor to attribute feedback to"));
     }
 
-    private void savePrediction(Long tenantId, DiagnosisSession session, ImldInferenceApiDtos.Response.PredictData p) {
+    private DiagnosisResult savePrediction(
+            Long tenantId, DiagnosisSession session, ImldInferenceApiDtos.Response.PredictData p) {
         String diseaseCode = "IMLD_RISK";
         String diseaseName = "遗传代谢性肝病风险提示";
-        List<String> genes = p.geneAbnormalities().stream().map(ImldInferenceApiDtos.Response.GeneAbnormality::gene).filter(Objects::nonNull).toList();
+        List<String> genes = p.geneAbnormalities() == null
+                ? List.of()
+                : p.geneAbnormalities().stream()
+                        .map(ImldInferenceApiDtos.Response.GeneAbnormality::gene)
+                        .filter(Objects::nonNull)
+                        .toList();
         if (genes.contains("ATP7B")) {
             diseaseCode = "WILSON_DISEASE";
             diseaseName = "肝豆状核变性（Wilson病）";
@@ -245,6 +270,7 @@ public class DiagnosesCommandService {
             priority += 10;
         }
         recommendationRepository.saveBatch(recommendations);
+        return result;
     }
 
     private String recType(String text) {

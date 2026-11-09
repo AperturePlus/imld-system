@@ -5,6 +5,7 @@ import jakarta.validation.constraints.Positive;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -90,6 +91,20 @@ public interface CarePlanApi {
             @Positive(message = "tenantId must be positive")
             Long tenantId,
             @Valid @RequestBody CarePlanApiDtos.Request.ResolveAlertRequest request
+    );
+
+    /**
+     * 从一条预警直接建立随访计划和首个随访任务。
+     */
+    @PostMapping("/alerts/{alertId}/followup")
+    ApiResponse<CarePlanApiDtos.Response.CreateFollowupFromAlertResponse> createFollowupFromAlert(
+            @RequestHeader("X-Tenant-Id")
+            @Positive(message = "tenantId must be positive")
+            Long tenantId,
+            @PathVariable("alertId")
+            @Positive(message = "alertId must be positive")
+            Long alertId,
+            @Valid @RequestBody CarePlanApiDtos.Request.CreateFollowupFromAlertRequest request
     );
 
     /**
